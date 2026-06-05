@@ -33,7 +33,7 @@ def main():
         if not eventos:
             mensagem = "Chefe, bom dia! Olhei a sua agenda e não encontrei compromissos próximos."
         else:
-            mensagem = "🗓️ *Bom dia! Seus próximos compromissos e contas:*\n\n"
+            mensagem = "🗓️ *Bom dia chefe! Seus próximos compromissos e contas:*\n\n"
             for evento in eventos:
                 inicio = evento['start'].get('dateTime', evento['start'].get('date'))
                 data_curta = inicio[:10]
