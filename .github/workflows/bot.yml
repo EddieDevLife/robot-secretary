@@ -1,10 +1,8 @@
-name: Despertador do Mordomo
+name: Secretãria 24h
 
 on:
   schedule:
-    # Roda todos os dias às 11:00 UTC (08:00 no horário de Brasília)
-    - cron: '0 11 * * *'
-  # Permite que você rode o código manualmente apertando um botão
+    - cron: '0 12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Baixar o código do repositório
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Preparar o ambiente Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
