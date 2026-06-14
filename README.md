@@ -39,6 +39,30 @@ reuniao com cliente amanha 15h → cria evento amanhã às 15:00
 2. Uma Service Account no Google Cloud com acesso ao **Calendar API** e **Sheets API**
 3. Conta do Google Cloud compartilhada com sua agenda e sua planilha
 
+## Configuração do Telegram
+
+Você precisa de duas informações: o **token do bot** e o seu **chat ID**.
+
+1. **Criar o bot:** no Telegram, abra o [@BotFather](https://t.me/BotFather), envie `/newbot` e siga as instruções (nome e usuário do bot). No final ele entrega o **token** — use em `TELEGRAM_TOKEN`.
+2. **Iniciar a conversa:** abra o seu novo bot e envie qualquer mensagem (ex: `/start`). Sem isso, o bot não consegue te responder.
+3. **Descobrir o chat ID:** envie uma mensagem ao [@userinfobot](https://t.me/userinfobot), que responde com o seu ID numérico — use em `CHAT_ID`. (Alternativa: acesse `https://api.telegram.org/bot<SEU_TOKEN>/getUpdates` e copie o valor de `"chat":{"id": ...}`.)
+4. **Preencher:** coloque `TELEGRAM_TOKEN` e `CHAT_ID` nas variáveis de ambiente (uso local) ou nos Secrets do repositório (GitHub Actions).
+
+O `CHAT_ID` funciona como uma trava: o bot só responde a esse chat, então ninguém mais consegue usar o seu robô.
+
+## Configuração do Google (Service Account)
+
+A *service account* é a "conta robô" que o bot usa para acessar sua agenda e planilha.
+
+1. **Criar o projeto:** acesse o [Google Cloud Console](https://console.cloud.google.com) e crie (ou escolha) um projeto.
+2. **Ativar as APIs:** em *APIs e serviços → Biblioteca*, ative **Google Calendar API** e **Google Sheets API**. (Pular isso causa o erro `SERVICE_DISABLED`.)
+3. **Criar a service account:** em *IAM e administrador → Contas de serviço*, clique em *Criar conta de serviço*. Anote o e-mail gerado, no formato `nome@projeto.iam.gserviceaccount.com`.
+4. **Gerar a chave JSON:** na conta de serviço, aba *Chaves → Adicionar chave → JSON*. Baixe o arquivo — o conteúdo dele vai em `GOOGLE_CREDENTIALS` (ou aponte o caminho em `GOOGLE_CREDENTIALS_FILE`).
+5. **Compartilhar a agenda:** no Google Agenda, *Configurações da agenda → Compartilhar com pessoas específicas*, adicione o e-mail da service account com **"Fazer alterações nos eventos"** (necessário para criar eventos).
+6. **Compartilhar a planilha:** abra a Google Sheet, clique em *Compartilhar*, adicione o e-mail da service account como **Editor**, e copie o ID da planilha (da URL) para `SHEET_ID`.
+
+Sem o passo 5 o bot dá erro de *writer access*; sem o passo 6, erro de *caller does not have permission*.
+
 ## Variáveis de ambiente
 
 Copie `.env.example` para `.env` e preencha:
@@ -65,11 +89,6 @@ Alternativa: use `GOOGLE_CREDENTIALS_FILE=/caminho/credentials.json` em vez de `
 A aba (padrão: `Controle Financeiro`) precisa de uma linha de cabeçalho com pelo menos as colunas **Data** e **Valor**. Também reconhece **Descricao**, **Categoria**, **Tipo** e **Hora** em qualquer ordem.
 
 O bot grava `Tipo` como `Receita` ou `Despesa` e `Valor` como número positivo, compatível com fórmulas `SOMASE`.
-
-## Permissões no Google
-
-- Compartilhe sua agenda com o e-mail da service account (leitura para lembretes, edição para criar eventos)
-- Compartilhe a planilha com a service account como **editora**
 
 ## Instalação local
 
