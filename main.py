@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -17,8 +18,13 @@ from googleapiclient.discovery import build
 
 DEFAULT_CALENDAR_ID = "ederbarreto41@gmail.com"
 DEFAULT_TIMEZONE = "America/Sao_Paulo"
-DEFAULT_SHEET_NAME = "Lancamentos"
+DEFAULT_SHEET_NAME = "Controle Financeiro"
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
+
+# Como a coluna "Tipo" e gravada e reconhecida na planilha.
+SHEET_TIPO_INCOME = "Receita"
+SHEET_TIPO_EXPENSE = "Despesa"
+INCOME_TIPO_WORDS = ("receita", "ganho", "entrada")
 
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
@@ -656,42 +662,67 @@ def parse_transaction_args(args: str) -> tuple[Decimal, str, str]:
     return amount, description.strip(), category.strip()
 
 
-def ensure_sheet_ready(sheets_service, config: Config) -> None:
+def _norm(value: Any) -> str:
+    """Normaliza texto: minusculo, sem acento, sem espacos nas bordas."""
+    text = str(value or "").strip().lower()
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _is_income(kind: str) -> bool:
+    return _norm(kind).startswith(INCOME_TIPO_WORDS)
+
+
+# Sinonimos de cabecalho aceitos para cada campo da tabela.
+HEADER_ALIASES = {
+    "data": "data",
+    "hora": "hora",
+    "tipo": "tipo",
+    "valor": "valor",
+    "descricao": "descricao",
+    "descrição": "descricao",
+    "categoria": "categoria",
+}
+
+
+@dataclass(frozen=True)
+class SheetTable:
+    header_row: int  # linha 1-based do cabecalho
+    columns: dict[str, int]  # campo -> indice de coluna (0-based)
+    values: list[list[Any]]  # todas as linhas lidas (A1 em diante)
+
+
+def locate_table(sheets_service, config: Config) -> SheetTable:
+    """Encontra a linha de cabecalho da tabela pelos nomes das colunas.
+
+    Funciona mesmo quando a tabela nao comeca na linha 1 (ha titulo/resumo
+    acima dela), desde que exista uma linha com 'Data' e 'Valor'.
+    """
     sheet_id = require(config.sheet_id, "SHEET_ID")
-    metadata = sheets_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-    existing_titles = {
-        sheet["properties"]["title"] for sheet in metadata.get("sheets", [])
-    }
-
-    if config.sheet_name not in existing_titles:
-        sheets_service.spreadsheets().batchUpdate(
-            spreadsheetId=sheet_id,
-            body={
-                "requests": [
-                    {"addSheet": {"properties": {"title": config.sheet_name}}}
-                ]
-            },
-        ).execute()
-
-    header_range = f"{config.sheet_name}!A1:F1"
-    header_result = (
+    result = (
         sheets_service.spreadsheets()
         .values()
-        .get(spreadsheetId=sheet_id, range=header_range)
+        .get(spreadsheetId=sheet_id, range=f"{config.sheet_name}!A1:Z2000")
         .execute()
     )
+    values = result.get("values", [])
 
-    if not header_result.get("values"):
-        sheets_service.spreadsheets().values().update(
-            spreadsheetId=sheet_id,
-            range=header_range,
-            valueInputOption="RAW",
-            body={
-                "values": [
-                    ["Data", "Hora", "Tipo", "Valor", "Descricao", "Categoria"]
-                ]
-            },
-        ).execute()
+    for index, row in enumerate(values):
+        normalized = [_norm(cell) for cell in row]
+        if "data" in normalized and "valor" in normalized:
+            columns: dict[str, int] = {}
+            for col_index, name in enumerate(normalized):
+                field = HEADER_ALIASES.get(name)
+                if field and field not in columns:
+                    columns[field] = col_index
+            return SheetTable(
+                header_row=index + 1, columns=columns, values=values
+            )
+
+    raise RuntimeError(
+        f"Nao encontrei o cabecalho (Data ... Valor) na aba '{config.sheet_name}'. "
+        "Confira o nome da aba (SHEET_NAME) e se ela tem essa linha de cabecalho."
+    )
 
 
 def append_transaction(
@@ -704,27 +735,45 @@ def append_transaction(
 ) -> None:
     sheet_id = require(config.sheet_id, "SHEET_ID")
     try:
-        ensure_sheet_ready(sheets_service, config)
+        table = locate_table(sheets_service, config)
     except Exception as exc:
         raise RuntimeError(f"Nao consegui preparar a planilha: {exc}") from exc
 
+    columns = table.columns
+    date_col = columns.get("data", 0)
+
+    # Descobre a proxima linha vazia abaixo do cabecalho (na coluna de data).
+    last_filled = table.header_row  # 1-based
+    for index in range(table.header_row, len(table.values)):
+        row = table.values[index]
+        cell = row[date_col] if date_col < len(row) else ""
+        if str(cell).strip():
+            last_filled = index + 1  # converte indice 0-based em linha 1-based
+    next_row = last_filled + 1
+
     now = local_now(config)
-    row = [
-        now.strftime("%Y-%m-%d"),
-        now.strftime("%H:%M"),
-        transaction_type,
-        float(amount),
-        description,
-        category,
-    ]
+    tipo = SHEET_TIPO_INCOME if transaction_type == "Ganho" else SHEET_TIPO_EXPENSE
+    field_values = {
+        "data": now.strftime("%d/%m/%Y"),
+        "hora": now.strftime("%H:%M"),
+        "tipo": tipo,
+        "valor": float(amount),
+        "descricao": description,
+        "categoria": category,
+    }
+
+    width = max(columns.values()) + 1
+    cells: list[Any] = ["" for _ in range(width)]
+    for field, col_index in columns.items():
+        if field in field_values:
+            cells[col_index] = field_values[field]
 
     try:
-        sheets_service.spreadsheets().values().append(
+        sheets_service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
-            range=f"{config.sheet_name}!A:F",
+            range=f"{config.sheet_name}!A{next_row}",
             valueInputOption="USER_ENTERED",
-            insertDataOption="INSERT_ROWS",
-            body={"values": [row]},
+            body={"values": [cells]},
         ).execute()
     except Exception as exc:
         raise RuntimeError(f"Falha ao salvar na planilha: {exc}") from exc
@@ -732,7 +781,7 @@ def append_transaction(
 
 @dataclass(frozen=True)
 class Transaction:
-    row_number: int  # linha real na planilha (1-based, inclui cabecalho)
+    row_number: int  # linha real na planilha (1-based)
     date: str
     time: str
     kind: str
@@ -750,33 +799,34 @@ def _row_to_amount(raw: Any) -> Decimal:
         return Decimal("0")
 
 
-def read_transactions(sheets_service, config: Config) -> list[Transaction]:
-    sheet_id = require(config.sheet_id, "SHEET_ID")
-    ensure_sheet_ready(sheets_service, config)
+def _cell(row: list[Any], columns: dict[str, int], field: str) -> str:
+    index = columns.get(field)
+    if index is None or index >= len(row):
+        return ""
+    return str(row[index] or "").strip()
 
-    result = (
-        sheets_service.spreadsheets()
-        .values()
-        .get(spreadsheetId=sheet_id, range=f"{config.sheet_name}!A2:F")
-        .execute()
-    )
-    rows = result.get("values", [])
+
+def read_transactions(sheets_service, config: Config) -> list[Transaction]:
+    table = locate_table(sheets_service, config)
+    columns = table.columns
 
     transactions: list[Transaction] = []
-    for index, row in enumerate(rows):
-        padded = list(row) + [""] * (6 - len(row))
-        date, time_value, kind, amount, description, category = padded[:6]
-        if not kind and not amount:
+    for index in range(table.header_row, len(table.values)):
+        row = table.values[index]
+        date = _cell(row, columns, "data")
+        kind = _cell(row, columns, "tipo")
+        amount_raw = _cell(row, columns, "valor")
+        if not date and not amount_raw:
             continue
         transactions.append(
             Transaction(
-                row_number=index + 2,  # +2 porque A2 e a primeira linha de dados
+                row_number=index + 1,  # linha real na planilha (1-based)
                 date=date,
-                time=time_value,
+                time=_cell(row, columns, "hora"),
                 kind=kind,
-                amount=_row_to_amount(amount),
-                description=description,
-                category=category,
+                amount=_row_to_amount(amount_raw),
+                description=_cell(row, columns, "descricao"),
+                category=_cell(row, columns, "categoria"),
             )
         )
     return transactions
@@ -801,6 +851,18 @@ def _month_filter(value: str, config: Config) -> tuple[int, int]:
     return now.year, now.month
 
 
+def _parse_any_date(value: str) -> dt.date | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+        try:
+            return dt.datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def build_balance_summary(sheets_service, config: Config, args: str) -> str:
     if not config.sheet_id:
         return "A planilha nao esta configurada (defina SHEET_ID)."
@@ -812,16 +874,13 @@ def build_balance_summary(sheets_service, config: Config, args: str) -> str:
     total_out = Decimal("0")
     count = 0
     for tx in transactions:
-        try:
-            tx_date = dt.date.fromisoformat(tx.date)
-        except (ValueError, TypeError):
+        tx_date = _parse_any_date(tx.date)
+        if tx_date is None:
             continue
         if tx_date.year != year or tx_date.month != month:
             continue
         count += 1
-        if tx.kind.lower().startswith("ganho") or tx.kind.lower().startswith(
-            "receita"
-        ):
+        if _is_income(tx.kind):
             total_in += tx.amount
         else:
             total_out += tx.amount
@@ -833,11 +892,11 @@ def build_balance_summary(sheets_service, config: Config, args: str) -> str:
 
     return "\n".join(
         [
-            f"Resumo de {label}",
+            f"📊 Resumo de {label}",
             "",
-            f"Entradas: R$ {total_in:.2f}",
-            f"Saidas:   R$ {total_out:.2f}",
-            f"Saldo:    R$ {balance:.2f}",
+            f"💰 Entradas: {format_brl(total_in)}",
+            f"💸 Saidas:   {format_brl(total_out)}",
+            f"➡️ Saldo:    {format_brl(balance)}",
             "",
             f"{count} lancamento(s) no mes.",
         ]
@@ -860,11 +919,11 @@ def build_statement(sheets_service, config: Config, args: str) -> str:
     recent = transactions[-limit:]
     lines = [f"Ultimos {len(recent)} lancamentos:", ""]
     for tx in recent:
-        sign = "-" if not tx.kind.lower().startswith(("ganho", "receita")) else "+"
+        sign = "+" if _is_income(tx.kind) else "-"
         desc = tx.description or "sem descricao"
         cat = f" ({tx.category})" if tx.category else ""
         lines.append(
-            f"#{tx.row_number} {tx.date} {sign}R$ {tx.amount:.2f} - {desc}{cat}"
+            f"#{tx.row_number} {tx.date} {sign}{format_brl(tx.amount)} - {desc}{cat}"
         )
     lines.append("")
     lines.append("Para apagar, use /apagar <numero> (ex: /apagar "

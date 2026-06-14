@@ -29,11 +29,19 @@ Opcionais:
 ```bash
 CALENDAR_ID=ederbarreto41@gmail.com
 TIMEZONE=America/Sao_Paulo
-SHEET_NAME=Lancamentos
+SHEET_NAME=Controle Financeiro
 TELEGRAM_OFFSET_FILE=.telegram_offset
 ```
 
 Voce tambem pode usar `GOOGLE_CREDENTIALS_FILE=/caminho/credentials.json` em vez de `GOOGLE_CREDENTIALS`.
+
+## Aba e colunas da planilha
+
+Por padrao o bot grava na aba **Controle Financeiro** (mude com `SHEET_NAME`). A aba precisa ter uma linha de cabecalho com as colunas, em qualquer ordem, contendo pelo menos **Data** e **Valor**. O bot reconhece tambem **Descricao**, **Categoria**, **Tipo** e **Hora**.
+
+O cabecalho nao precisa estar na linha 1: pode haver titulo e um bloco de resumo (Receitas/Despesas/Saldo) acima dele. O bot localiza a tabela pelos nomes das colunas e escreve na primeira linha livre abaixo.
+
+Ao registrar, o bot grava `Tipo` como **Receita** (entradas) ou **Despesa** (saidas), `Valor` como numero positivo e `Data` como `dd/mm/aaaa`. Assim suas formulas de resumo (ex: SOMASE por Tipo) somam automaticamente.
 
 ## Permissoes no Google
 
@@ -41,7 +49,7 @@ Compartilhe sua agenda com o e-mail da service account.
 
 Para apenas ler lembretes, permissao de leitura basta. Para criar eventos pelo bot, a service account precisa poder editar a agenda.
 
-Para registrar gastos e ganhos, crie ou escolha uma Google Sheet, compartilhe com a service account como editora e defina `SHEET_ID`.
+Para registrar gastos e ganhos, compartilhe a Google Sheet com a service account como **editora** e defina `SHEET_ID`. Habilite tambem a **Google Sheets API** no projeto do Google Cloud.
 
 ## Instalar
 

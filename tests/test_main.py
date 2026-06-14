@@ -7,6 +7,7 @@ from pathlib import Path
 from main import (
     BotReply,
     Config,
+    build_balance_summary,
     build_window_summary,
     format_brl,
     handle_telegram_text,
@@ -133,6 +134,32 @@ class MainParserTest(unittest.TestCase):
         self.assertIn("✅", reply.text)
         self.assertIn("R$ 50,00", reply.text)
         self.assertEqual(len(services.sheets.appended), 1)
+        # Layout da Controle Financeiro: Data, Descricao, Categoria, Tipo, Valor.
+        row = services.sheets.appended[0]
+        self.assertEqual(row[1], "mercado")  # descricao
+        self.assertEqual(row[3], "Despesa")  # tipo
+        self.assertEqual(row[4], 50.0)       # valor numerico
+
+    def test_rich_confirmation_for_income_writes_receita(self) -> None:
+        services = FakeServices()
+        config = dataclasses.replace(self.config, sheet_id="SHEET123")
+        reply = handle_telegram_text(
+            "recebi 2000 de salario", 123, config, services
+        )
+        self.assertEqual(reply.kind, "ganho")
+        row = services.sheets.appended[0]
+        self.assertEqual(row[3], "Receita")  # tipo
+        self.assertEqual(row[4], 2000.0)     # valor numerico
+
+    def test_read_transactions_classifies_receita_despesa(self) -> None:
+        services = FakeServices()
+        config = dataclasses.replace(self.config, sheet_id="SHEET123")
+        handle_telegram_text("recebi 2000 salario", 1, config, services)
+        handle_telegram_text("gastei 80 mercado", 1, config, services)
+        summary = build_balance_summary(services.sheets, config, "")
+        self.assertIn("R$ 2.000,00", summary)  # entradas
+        self.assertIn("R$ 80,00", summary)     # saidas
+        self.assertIn("R$ 1.920,00", summary)  # saldo
 
     def test_window_summary_aggregates(self) -> None:
         counters = {
@@ -159,12 +186,15 @@ class MainParserTest(unittest.TestCase):
 
 
 class FakeSheets:
-    """Planilha falsa que apenas registra o que seria gravado."""
+    """Planilha falsa com cabecalho da Controle Financeiro e captura de escrita."""
 
     def __init__(self) -> None:
         self.appended: list[list] = []
+        # Cabecalho na linha 1, no layout da aba Controle Financeiro.
+        self.grid: list[list] = [
+            ["Data", "Descrição", "Categoria", "Tipo", "Valor"]
+        ]
 
-    # Imita a cadeia spreadsheets().values().append(...).execute()
     def spreadsheets(self):
         return self
 
@@ -173,23 +203,27 @@ class FakeSheets:
 
         class _Exec:
             def execute(self_inner):
-                # ensure_sheet_ready espera metadados de abas e cabecalho.
-                if range:
-                    return {"values": [["Data", "Hora", "Tipo", "Valor", "Desc", "Cat"]]}
-                return {"sheets": [{"properties": {"title": "Lancamentos"}}]}
+                if range:  # locate_table le o intervalo da aba
+                    return {"values": outer.grid}
+                return {
+                    "sheets": [
+                        {"properties": {"title": "Controle Financeiro", "sheetId": 0}}
+                    ]
+                }
 
         return _Exec()
 
     def values(self):
         return self
 
-    def append(self, spreadsheetId=None, range=None, valueInputOption=None,  # noqa: N803
-               insertDataOption=None, body=None):
+    def update(self, spreadsheetId=None, range=None, valueInputOption=None,  # noqa: N803
+               body=None):
         outer = self
 
         class _Exec:
             def execute(self_inner):
                 outer.appended.extend(body["values"])
+                outer.grid.extend(body["values"])
                 return {}
 
         return _Exec()
