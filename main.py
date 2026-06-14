@@ -516,6 +516,9 @@ STOPWORDS_FOR_DESCRIPTION = {
     "pila",
     "conto",
     "r$",
+    "hoje",
+    "amanha",
+    "amanhã",
 }
 
 
@@ -556,30 +559,65 @@ def interpret_natural_language(text: str, config: Config) -> tuple[str, str] | N
     return None
 
 
+EVENT_WORDS = (
+    "reuniao",
+    "reunião",
+    "consulta",
+    "compromisso",
+    "marcar",
+    "marca",
+    "marque",
+    "agendar",
+    "agenda",
+    "evento",
+    "encontro",
+    "call",
+    "dentista",
+    "medico",
+    "médico",
+    "aula",
+    "prova",
+    "exame",
+    "treino",
+    "academia",
+    "missa",
+    "culto",
+    "entrevista",
+    "viagem",
+    "voo",
+    "festa",
+    "aniversario",
+    "aniversário",
+    "jantar",
+    "almoco",
+    "almoço",
+    "cafe",
+    "café",
+    "trabalho",
+    "plantao",
+    "plantão",
+    "reuniao",
+)
+
+# Hora no formato 15:00, 15h, 15h30 ou "15 horas".
+TIME_PATTERN = re.compile(r"\b(\d{1,2})(?::(\d{2})|\s*h(\d{2})?|\s*horas?)\b")
+
+
+def _contains_time(text: str) -> bool:
+    return bool(TIME_PATTERN.search(text))
+
+
 def looks_like_event(lowered: str, config: Config) -> bool:
-    event_words = (
-        "reuniao",
-        "reunião",
-        "consulta",
-        "compromisso",
-        "marcar",
-        "marca",
-        "agendar",
-        "agenda",
-        "evento",
-        "encontro",
-        "call",
-        "dentista",
-        "medico",
-        "médico",
-    )
-    has_event_word = any(word in lowered for word in event_words)
-    has_datetime = _contains_parseable_date(lowered, config)
-    return has_event_word and has_datetime
+    has_event_word = any(word in lowered for word in EVENT_WORDS)
+    has_date = _contains_parseable_date(lowered, config)
+    has_time = _contains_time(lowered)
+    # Evento se: ha palavra de agenda com data, OU ha data e horario juntos
+    # (ex: "ingles hoje as 20:00"), o que ja e um forte sinal de agendamento.
+    return has_date and (has_event_word or has_time)
 
 
 def _contains_parseable_date(lowered: str, config: Config) -> bool:
-    # Datas explicitas (06/06, 2026-06-06) ou palavras relativas com hora.
+    # Datas explicitas (06/06, 2026-06-06) ou palavras relativas.
     if re.search(r"\d{1,2}/\d{1,2}", lowered):
         return True
     if re.search(r"\d{4}-\d{2}-\d{2}", lowered):
@@ -605,9 +643,9 @@ def build_event_args_from_text(text: str, config: Config) -> str:
     elif rel_match:
         date_token = rel_match.group(1)
 
-    # Captura uma hora: 15:00, 15h, 15h30, as 15.
+    # Captura uma hora: 15:00, 15h, 15h30, "15 horas".
     time_token = None
-    time_match = re.search(r"(\d{1,2})(?::(\d{2})|h(\d{2})?)", text)
+    time_match = TIME_PATTERN.search(text)
     if time_match:
         hour = int(time_match.group(1))
         minutes = time_match.group(2) or time_match.group(3) or "00"
@@ -620,13 +658,18 @@ def build_event_args_from_text(text: str, config: Config) -> str:
     for pattern in [
         r"\d{1,2}/\d{1,2}(?:/\d{2,4})?",
         r"\d{4}-\d{2}-\d{2}",
-        r"\b\d{1,2}(?::\d{2}|h\d{0,2})\b",
+        r"\b\d{1,2}:\d{2}\b",          # 20:00 (relogio completo primeiro)
+        r"\b\d{1,2}\s*h\d{2}\b",       # 20h30
+        r"\b\d{1,2}\s*h\b",            # 20h
+        r"\b\d{1,2}\s*horas?\b",       # 20 horas
+        r"\bhoras?\b",
         r"\b(hoje|amanha|amanhã)\b",
-        r"\b(as|às|dia|para|pra|no|na|de)\b",
-        r"\b(marcar|marca|agendar|agenda|marque)\b",
+        r"\b(as|às|dia|para|pra|no|na|de|do|da)\b",
+        r"\b(tenho|tem|marcar|marca|agendar|agenda|marque)\b",
     ]:
         title_source = re.sub(pattern, " ", title_source, flags=re.IGNORECASE)
-    title = re.sub(r"\s+", " ", title_source).strip(" .,-") or "Compromisso"
+    title = re.sub(r"[:]+", " ", title_source)
+    title = re.sub(r"\s+", " ", title).strip(" .,-") or "Compromisso"
 
     return f"{title} | {when}" if when else title
 

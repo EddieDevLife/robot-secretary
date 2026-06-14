@@ -117,6 +117,34 @@ class MainParserTest(unittest.TestCase):
             interpret_natural_language("bom dia, tudo bem?", self.config)
         )
 
+    def test_natural_language_event_aula(self) -> None:
+        result = interpret_natural_language(
+            "Tenho aula de ingles hoje as 20:00 horas", self.config
+        )
+        self.assertIsNotNone(result)
+        command, args = result
+        self.assertEqual(command, "/evento")
+        title, when = [part.strip() for part in args.split("|", 1)]
+        self.assertIn("aula", title.lower())
+        self.assertIn("hoje", when.lower())
+        self.assertIn("20:00", when)
+
+    def test_natural_language_event_date_time_without_keyword(self) -> None:
+        # Sem palavra de agenda, mas com data + horario juntos.
+        result = interpret_natural_language(
+            "ingles hoje as 20h", self.config
+        )
+        self.assertIsNotNone(result)
+        command, args = result
+        self.assertEqual(command, "/evento")
+        self.assertIn("20:00", args)
+
+    def test_expense_not_treated_as_event(self) -> None:
+        # Mesmo com 'hoje', um gasto com valor deve virar /gasto.
+        result = interpret_natural_language("gastei 50 hoje no mercado", self.config)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "/gasto")
+
     def test_format_brl(self) -> None:
         self.assertEqual(format_brl(Decimal("50")), "R$ 50,00")
         self.assertEqual(format_brl(Decimal("1234.56")), "R$ 1.234,56")
