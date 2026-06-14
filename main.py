@@ -16,7 +16,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 
-DEFAULT_CALENDAR_ID = "ederbarreto41@gmail.com"
+DEFAULT_CALENDAR_ID = "seu_email@gmail.com"
 DEFAULT_TIMEZONE = "America/Sao_Paulo"
 DEFAULT_SHEET_NAME = "Controle Financeiro"
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"

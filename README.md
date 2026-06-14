@@ -1,57 +1,77 @@
 # robot-secretary
 
-Assistente pessoal integrado ao Telegram, Google Calendar e Google Sheets.
+Assistente pessoal via Telegram integrado ao Google Calendar e Google Sheets. Roda de graça no GitHub Actions — sem servidor, sem custo fixo.
 
-## O que mudou
+## O que faz
 
-O bot antigo consultava a agenda usando `datetime.utcnow()` e `timeMin=agora`. Isso podia esconder compromissos do começo do dia e eventos de dia inteiro, principalmente quando voce esperava um resumo da agenda de hoje.
+- Envia um **resumo diário da agenda** às 07:00 (BRT)
+- Responde comandos no Telegram para consultar e criar eventos no Google Calendar
+- Registra gastos e ganhos em uma Google Sheet e responde consultas de saldo e extrato
+- Entende **linguagem natural** além dos comandos com barra
 
-Agora o lembrete diario consulta a janela completa do dia no fuso `America/Sao_Paulo` por padrao. Tambem existe um modo de diagnostico para conferir ambiente, janela consultada e eventos encontrados.
+## Comandos no Telegram
 
-## Variaveis de ambiente
+```
+/hoje                                         lista os eventos de hoje
+/proximos                                     próximos 5 eventos
+/evento Reunião | 15/06/2026 15:00 | 60       cria evento com duração em minutos
+/evento Folga | 16/06/2026                    cria evento de dia inteiro
+/gasto 42,50 Mercado | Alimentacao            registra despesa
+/ganho 2500 Salario | Trabalho                registra receita
+/saldo                                        saldo do mês atual
+/saldo 05/2026                                saldo de um mês específico
+/extrato                                      últimos lançamentos numerados
+/apagar 12                                    remove a linha 12 da planilha
+```
 
-Obrigatorias para enviar lembretes e responder comandos de agenda:
+O bot também entende frases soltas:
+
+```
+gastei 50 no mercado          → registra um gasto de R$ 50
+paguei R$ 1.234,56 aluguel    → registra um gasto de R$ 1.234,56
+recebi 2000 de salario        → registra um ganho de R$ 2.000
+reuniao com cliente amanha 15h → cria evento amanhã às 15:00
+```
+
+## Pré-requisitos
+
+1. Um bot no Telegram (via [@BotFather](https://t.me/BotFather))
+2. Uma Service Account no Google Cloud com acesso ao **Calendar API** e **Sheets API**
+3. Conta do Google Cloud compartilhada com sua agenda e sua planilha
+
+## Variáveis de ambiente
+
+Copie `.env.example` para `.env` e preencha:
 
 ```bash
+# Obrigatórias
 TELEGRAM_TOKEN=token_do_bot
-CHAT_ID=id_do_chat
-GOOGLE_CREDENTIALS='{"type":"service_account",...}'
-```
+CHAT_ID=id_do_seu_chat
+GOOGLE_CREDENTIALS='{"type":"service_account",...}'   # JSON da service account
 
-Obrigatoria para registrar `/gasto` e `/ganho`:
+# Para /gasto, /ganho, /saldo e /extrato
+SHEET_ID=id_da_sua_planilha
 
-```bash
-SHEET_ID=id_da_planilha_google
-```
-
-Opcionais:
-
-```bash
-CALENDAR_ID=ederbarreto41@gmail.com
+# Opcionais (já têm padrão)
+CALENDAR_ID=seu_email@gmail.com
 TIMEZONE=America/Sao_Paulo
 SHEET_NAME=Controle Financeiro
-TELEGRAM_OFFSET_FILE=.telegram_offset
 ```
 
-Voce tambem pode usar `GOOGLE_CREDENTIALS_FILE=/caminho/credentials.json` em vez de `GOOGLE_CREDENTIALS`.
+Alternativa: use `GOOGLE_CREDENTIALS_FILE=/caminho/credentials.json` em vez de `GOOGLE_CREDENTIALS`.
 
-## Aba e colunas da planilha
+## Planilha
 
-Por padrao o bot grava na aba **Controle Financeiro** (mude com `SHEET_NAME`). A aba precisa ter uma linha de cabecalho com as colunas, em qualquer ordem, contendo pelo menos **Data** e **Valor**. O bot reconhece tambem **Descricao**, **Categoria**, **Tipo** e **Hora**.
+A aba (padrão: `Controle Financeiro`) precisa de uma linha de cabeçalho com pelo menos as colunas **Data** e **Valor**. Também reconhece **Descricao**, **Categoria**, **Tipo** e **Hora** em qualquer ordem.
 
-O cabecalho nao precisa estar na linha 1: pode haver titulo e um bloco de resumo (Receitas/Despesas/Saldo) acima dele. O bot localiza a tabela pelos nomes das colunas e escreve na primeira linha livre abaixo.
+O bot grava `Tipo` como `Receita` ou `Despesa` e `Valor` como número positivo, compatível com fórmulas `SOMASE`.
 
-Ao registrar, o bot grava `Tipo` como **Receita** (entradas) ou **Despesa** (saidas), `Valor` como numero positivo e `Data` como `dd/mm/aaaa`. Assim suas formulas de resumo (ex: SOMASE por Tipo) somam automaticamente.
+## Permissões no Google
 
-## Permissoes no Google
+- Compartilhe sua agenda com o e-mail da service account (leitura para lembretes, edição para criar eventos)
+- Compartilhe a planilha com a service account como **editora**
 
-Compartilhe sua agenda com o e-mail da service account.
-
-Para apenas ler lembretes, permissao de leitura basta. Para criar eventos pelo bot, a service account precisa poder editar a agenda.
-
-Para registrar gastos e ganhos, compartilhe a Google Sheet com a service account como **editora** e defina `SHEET_ID`. Habilite tambem a **Google Sheets API** no projeto do Google Cloud.
-
-## Instalar
+## Instalação local
 
 ```bash
 python3 -m venv .venv
@@ -59,127 +79,36 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Rodar
-
-Diagnostico:
+Comandos úteis:
 
 ```bash
-python3 main.py diagnose
+python3 main.py diagnose          # verifica ambiente e mostra eventos encontrados
+python3 main.py reminder          # envia o lembrete diário agora
+python3 main.py bot               # processa comandos pendentes uma vez
+python3 main.py bot --watch       # fica escutando continuamente
 ```
 
-Enviar o lembrete diario:
+## GitHub Actions (sem servidor)
 
-```bash
-python3 main.py reminder
+Configure os seguintes **Secrets** no repositório (`Settings → Secrets and variables → Actions`):
+
 ```
-
-Processar comandos recebidos no Telegram uma vez:
-
-```bash
-python3 main.py bot
-```
-
-Manter o bot escutando comandos:
-
-```bash
-python3 main.py bot --watch
-```
-
-Escutar por um tempo limitado e encerrar (usado pelo GitHub Actions):
-
-```bash
-python3 main.py bot --watch --interval 3 --max-runtime 300
-```
-
-## Comandos no Telegram
-
-```text
-/hoje
-/proximos
-/evento Reuniao com cliente | 06/06/2026 15:00 | 60 | pauta inicial
-/evento Folga | 07/06/2026
-/gasto 42,50 Mercado | Alimentacao
-/ganho 2500 Salario | Trabalho
-/saldo
-/saldo 05/2026
-/extrato
-/apagar 12
-```
-
-Eventos com horario usam duracao em minutos. Eventos apenas com data viram eventos de dia inteiro.
-
-`/saldo` soma entradas e saidas do mes (ou de um mes especifico). `/extrato` lista os ultimos lancamentos numerados pela linha da planilha. `/apagar <numero>` remove a linha indicada pelo `/extrato`.
-
-### Linguagem natural
-
-Alem dos comandos com barra, o bot tambem entende frases soltas:
-
-```text
-gastei 50 no mercado          -> registra um gasto de R$ 50
-paguei R$ 1.234,56 aluguel    -> registra um gasto de R$ 1234,56
-recebi 2000 de salario        -> registra um ganho de R$ 2000
-reuniao com cliente amanha 15h -> cria um evento amanha as 15:00
-```
-
-A interpretacao e baseada em palavras-chave (gastei/paguei/comprei, recebi/ganhei, e termos de agenda como reuniao/consulta com uma data/hora). Quando ela falha, use o comando com barra correspondente.
-
-## GitHub Actions
-
-Há dois workflows:
-
-`.github/workflows/daily-reminder.yml` roda todo dia as 10:00 UTC (aprox. 07:00 em `America/Sao_Paulo`) e envia a agenda do dia.
-
-`.github/workflows/bot.yml` (Secretaria - responder comandos) funciona de forma **assincrona**: voce manda os comandos quando quiser e o bot responde no proximo horario agendado.
-
-- **Horarios fixos:** o bot acorda as **09:00, 12:00, 15:00, 18:00 e 21:00** (horario de Brasilia), processa tudo o que voce enviou desde a ultima vez e confirma cada registro (ex: *"Gasto registrado: R$ 50,00 - mercado"*). Para mudar os horarios, edite os `cron` em `bot.yml` (estao em UTC; Brasilia = UTC-3).
-- **Teste / forcar agora:** na aba *Actions* do GitHub, abra *Secretaria - responder comandos* e clique em *Run workflow*. O bot escuta por ~5 minutos; mande um comando no Telegram e a resposta chega na hora.
-
-Como o offset do Telegram e confirmado a cada execucao, mensagens ja processadas nao sao respondidas de novo no horario seguinte.
-
-### Confirmacoes
-
-Cada lancamento recebe uma confirmacao detalhada, por exemplo:
-
-```text
-✅ Gasto registrado
-💸 R$ 1.234,56 — aluguel
-🏷️ Casa
-🕒 14/06 09:00
-```
-
-Quando voce envia varias mensagens na mesma janela, ao final o bot manda um resumo:
-
-```text
-📋 Resumo da janela
-💸 2 gasto(s): R$ 1.284,56
-💰 1 ganho(s): R$ 2.000,00
-📅 1 evento(s)
-➡️ Saldo no periodo: R$ 715,44
-```
-
-Atencao ao custo: em repositorio privado o GitHub da 2000 minutos gratis por mes. Com 5 execucoes curtas por dia o consumo e baixo (cabe folgado nos 2000). Em repositorio publico os minutos sao ilimitados. O GitHub pode atrasar execucoes agendadas em alguns minutos em horarios de pico. Se um dia precisar de resposta instantanea, considere hospedar `python main.py bot --watch` em um servico como Railway, Render ou Fly.io.
-
-Configure estes secrets no GitHub:
-
-```text
 TELEGRAM_TOKEN
 CHAT_ID
 GOOGLE_CREDENTIALS
+SHEET_ID          (para comandos financeiros)
+CALENDAR_ID       (opcional)
+TIMEZONE          (opcional)
+SHEET_NAME        (opcional)
 ```
 
-Para usar `/gasto`, `/ganho`, `/saldo` e `/extrato`, configure tambem:
+Há dois workflows:
 
-```text
-SHEET_ID
-```
+**`daily-reminder.yml`** — roda todo dia às 10:00 UTC (07:00 BRT) e envia a agenda do dia.
 
-Se quiser sobrescrever a agenda ou o fuso, configure tambem:
+**`bot.yml`** — modo assíncrono: o bot acorda às **09:00, 12:00, 15:00, 18:00 e 21:00 (BRT)**, processa tudo que você enviou desde a última vez e confirma cada registro. Para disparar na hora, vá em *Actions → Secretaria - responder comandos → Run workflow*.
 
-```text
-CALENDAR_ID
-TIMEZONE
-SHEET_NAME
-```
+Em repositório público os minutos do Actions são ilimitados. Em repositório privado, o plano gratuito inclui 2.000 min/mês (suficiente para este uso).
 
 ## Testes
 
