@@ -745,7 +745,7 @@ def locate_table(sheets_service, config: Config) -> SheetTable:
     result = (
         sheets_service.spreadsheets()
         .values()
-        .get(spreadsheetId=sheet_id, range=f"{config.sheet_name}!A1:Z2000")
+        .get(spreadsheetId=sheet_id, range=f"'{config.sheet_name}'!A1:Z2000")
         .execute()
     )
     values = result.get("values", [])
@@ -814,7 +814,7 @@ def append_transaction(
     try:
         sheets_service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
-            range=f"{config.sheet_name}!A{next_row}",
+            range=f"'{config.sheet_name}'!A{next_row}",
             valueInputOption="USER_ENTERED",
             body={"values": [cells]},
         ).execute()
