@@ -5,9 +5,13 @@ on:
   schedule:
     - cron: "0 10 * * *"
 
+permissions:
+  contents: read
+
 jobs:
   reminder:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -21,7 +25,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Conferir secrets obrigatorios
+        id: config
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          missing=()
+          [ -n "$TELEGRAM_TOKEN" ] || missing+=("TELEGRAM_TOKEN")
+          [ -n "$CHAT_ID" ] || missing+=("CHAT_ID")
+          [ -n "$GOOGLE_CREDENTIALS" ] || missing+=("GOOGLE_CREDENTIALS")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            printf 'Secrets ausentes; pulando execucao: %s\n' "${missing[*]}"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Send daily reminder
+        if: steps.config.outputs.skip != 'true'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}

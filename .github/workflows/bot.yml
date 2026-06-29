@@ -32,9 +32,13 @@ concurrency:
   group: secretaria-bot
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   responder:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Baixar o codigo do repositorio
         uses: actions/checkout@v4
@@ -47,7 +51,29 @@ jobs:
       - name: Instalar as ferramentas de trabalho
         run: pip install -r requirements.txt
 
+      - name: Conferir secrets obrigatorios
+        id: config
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: |
+          missing=()
+          [ -n "$TELEGRAM_TOKEN" ] || missing+=("TELEGRAM_TOKEN")
+          [ -n "$CHAT_ID" ] || missing+=("CHAT_ID")
+          [ -n "$GOOGLE_CREDENTIALS" ] || missing+=("GOOGLE_CREDENTIALS")
+          [ -n "$SHEET_ID" ] || missing+=("SHEET_ID")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            printf 'Secrets ausentes; pulando execucao: %s\n' "${missing[*]}"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Escutar e responder comandos
+        if: steps.config.outputs.skip != 'true'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -57,5 +83,5 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           SHEET_NAME: ${{ secrets.SHEET_NAME }}
         run: |
-          DURACAO="${{ github.event.inputs.duracao || '90' }}"
+          DURACAO="${{ github.event.inputs.duracao || '300' }}"
           python main.py bot --watch --interval 3 --max-runtime "$DURACAO"
